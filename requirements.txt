@@ -119,7 +119,7 @@ rpds-py==0.30.0
 scipy==1.17.1
 setuptools==80.10.1
 simple-websocket==1.1.0
-simplejson==3.20.2
+simplejson==4.1.1
 six==1.17.0
 sniffio==1.3.1
 SQLAlchemy==2.0.49
