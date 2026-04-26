@@ -176,6 +176,14 @@ export const tradingApi = {
   },
 
   /**
+   * Place smart order (position-size aware — sends only the delta needed)
+   */
+  placeSmartOrder: async (order: PlaceOrderRequest & { position_size: number }): Promise<ApiResponse<{ orderid: string }>> => {
+    const response = await apiClient.post<ApiResponse<{ orderid: string }>>('/placesmartorder', order)
+    return response.data
+  },
+
+  /**
    * Modify order (uses session auth with CSRF)
    */
   modifyOrder: async (

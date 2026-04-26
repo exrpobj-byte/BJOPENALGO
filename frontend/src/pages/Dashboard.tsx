@@ -74,6 +74,7 @@ export default function Dashboard() {
       setIsLoading(true)
       const response = await fetch('/auth/dashboard-data', {
         credentials: 'include',
+        headers: { Accept: 'application/json' },
       })
 
       if (response.status === 401) {
@@ -99,6 +100,9 @@ export default function Dashboard() {
 
   useEffect(() => {
     fetchFundsData()
+    // Auto-refresh funds every 30 seconds for live P&L updates
+    const interval = setInterval(fetchFundsData, 30000)
+    return () => clearInterval(interval)
   }, [fetchFundsData])
 
   // Refresh funds when an order is placed (via SocketIO event)

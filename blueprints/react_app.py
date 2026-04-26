@@ -185,6 +185,12 @@ def react_pnltracker():
     return serve_react_app()
 
 
+# Trade Statistics page (paper trade performance metrics)
+@react_bp.route("/trade-statistics")
+def react_trade_statistics():
+    return serve_react_app()
+
+
 # Tools overview (Option Chain, IV Chart, etc.)
 @react_bp.route("/tools")
 def react_tools():

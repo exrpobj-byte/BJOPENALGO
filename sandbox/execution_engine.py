@@ -105,42 +105,67 @@ class ExecutionEngine:
 
     def _fetch_quote(self, symbol, exchange):
         """
-        Fetch real-time quote for a symbol using API key
+        Fetch real-time quote for a symbol using API key.
         Returns dict with ltp, high, low, open, close, etc.
-        Returns None if quote cannot be fetched (permission error, API error, etc.)
+        Returns None if quote cannot be fetched, times out, or encounters an error.
+        Uses a 5-second timeout to prevent blocking the caller indefinitely when
+        the broker API is slow or unreachable.
         """
+        import concurrent.futures
+
+        # Capture Flask app reference in the calling thread so the worker thread
+        # can push its own app context (required for SQLAlchemy DB queries).
         try:
-            # Get any user's API key for fetching quotes
-            from database.auth_db import ApiKeys, decrypt_token
+            from flask import current_app, has_request_context
+            app = current_app._get_current_object() if has_request_context() else None
+        except RuntimeError:
+            app = None
 
-            api_key_obj = ApiKeys.query.first()
+        def _do_fetch():
+            """Runs in a worker thread with its own app context."""
+            ctx = app.app_context() if app else None
+            try:
+                if ctx:
+                    ctx.push()
+                from database.auth_db import ApiKeys, decrypt_token
 
-            if not api_key_obj:
-                logger.debug("No API keys found for fetching quotes")
-                return None
+                api_key_obj = ApiKeys.query.first()
+                if not api_key_obj:
+                    logger.debug("No API keys found for fetching quotes")
+                    return None
 
-            # Decrypt the API key
-            api_key = decrypt_token(api_key_obj.api_key_encrypted)
+                api_key = decrypt_token(api_key_obj.api_key_encrypted)
 
-            # Use quotes service with API key authentication
-            success, response, status_code = get_quotes(
-                symbol=symbol, exchange=exchange, api_key=api_key
-            )
-
-            if success and "data" in response:
-                quote_data = response["data"]
-                logger.debug(f"Fetched quote for {symbol}: LTP={quote_data.get('ltp', 0)}")
-                return quote_data
-            else:
-                # Log at debug level to avoid spam for permission errors
-                logger.debug(
-                    f"Could not fetch quote for {symbol}: {response.get('message', 'Unknown error')}"
+                success, response, status_code = get_quotes(
+                    symbol=symbol, exchange=exchange, api_key=api_key
                 )
-                return None
 
+                if success and "data" in response:
+                    quote_data = response["data"]
+                    logger.debug(f"Fetched quote for {symbol}: LTP={quote_data.get('ltp', 0)}")
+                    return quote_data
+                else:
+                    logger.debug(
+                        f"Could not fetch quote for {symbol}: {response.get('message', 'Unknown error')}"
+                    )
+                    return None
+            except Exception as e:
+                logger.debug(f"Exception fetching quote for {symbol}: {str(e)}")
+                return None
+            finally:
+                if ctx:
+                    ctx.pop()
+
+        try:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(_do_fetch)
+                try:
+                    return future.result(timeout=5.0)
+                except concurrent.futures.TimeoutError:
+                    logger.debug(f"Quote fetch timed out after 5s for {symbol}")
+                    return None
         except Exception as e:
-            # Handle all exceptions gracefully - don't stop execution engine
-            logger.debug(f"Exception fetching quote for {symbol}: {str(e)}")
+            logger.debug(f"Quote fetch thread error for {symbol}: {str(e)}")
             return None
 
     def _fetch_quotes_batch(self, symbols_list):

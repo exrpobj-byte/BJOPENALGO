@@ -103,6 +103,9 @@ export function PlaceOrderDialog({
 }: PlaceOrderDialogProps) {
   const { apiKey } = useAuthStore()
 
+  // Order mode: regular or smart
+  const [orderMode, setOrderMode] = useState<'regular' | 'smart'>('regular')
+
   // Form state
   const [formAction, setFormAction] = useState<'BUY' | 'SELL'>(initialAction)
   const [formQuantity, setFormQuantity] = useState(initialQuantity ?? lotSize)
@@ -110,6 +113,7 @@ export function PlaceOrderDialog({
   const [formProduct, setFormProduct] = useState(initialProduct)
   const [formPrice, setFormPrice] = useState(0)
   const [formTriggerPrice, setFormTriggerPrice] = useState(0)
+  const [formPositionSize, setFormPositionSize] = useState(0)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [isDepthExpanded, setIsDepthExpanded] = useState(false)
   const [quantityMode, setQuantityMode] = useState<'lots' | 'shares'>('lots')
@@ -129,6 +133,7 @@ export function PlaceOrderDialog({
   // Reset form when dialog opens with new values
   useEffect(() => {
     if (open) {
+      setOrderMode('regular')
       setFormAction(initialAction)
       setFormQuantity(initialQuantity ?? lotSize)
       setFormPriceType(initialPriceType)
@@ -143,6 +148,7 @@ export function PlaceOrderDialog({
       setFormProduct(productToUse)
       setFormPrice(0)
       setFormTriggerPrice(0)
+      setFormPositionSize(0)
       setIsDepthExpanded(false)
       setQuantityMode('lots')
       setLotMultiplier(1)
@@ -188,6 +194,16 @@ export function PlaceOrderDialog({
     return true
   }, [symbol, exchange, apiKey, formQuantity, needsPrice, formPrice, needsTrigger, formTriggerPrice])
 
+  // Smart order: position_size can be negative (short), zero (flatten), or positive (long)
+  const isSmartValid = useCallback(() => {
+    if (!symbol || !exchange) return false
+    if (!apiKey) return false
+    if (formQuantity <= 0) return false
+    if (needsPrice && formPrice <= 0) return false
+    if (needsTrigger && formTriggerPrice <= 0) return false
+    return true
+  }, [symbol, exchange, apiKey, formQuantity, needsPrice, formPrice, needsTrigger, formTriggerPrice])
+
   // Submit order
   const handleSubmit = async () => {
     if (!isValid()) {
@@ -207,7 +223,7 @@ export function PlaceOrderDialog({
       // Backend accepts: MARKET, LIMIT, SL (Stop Loss Limit), SL-M (Stop Loss Market)
       const apiPriceType = formPriceType as 'MARKET' | 'LIMIT' | 'SL' | 'SL-M'
 
-      const orderRequest = {
+      const baseOrder = {
         apikey: apiKey,
         strategy,
         exchange,
@@ -220,7 +236,9 @@ export function PlaceOrderDialog({
         ...(needsTrigger && { trigger_price: formTriggerPrice }),
       }
 
-      const response = await tradingApi.placeOrder(orderRequest)
+      const response = orderMode === 'smart'
+        ? await tradingApi.placeSmartOrder({ ...baseOrder, position_size: formPositionSize })
+        : await tradingApi.placeOrder(baseOrder)
 
       // Response structure: { status: "success", orderid: "..." } or { status: "error", message: "..." }
       // Note: orderid is at root level, not in data field
@@ -287,6 +305,34 @@ export function PlaceOrderDialog({
             </span>
           </DialogTitle>
         </DialogHeader>
+
+        {/* Order Mode Toggle */}
+        <div className="flex gap-1 p-1 bg-muted rounded-lg">
+          <button
+            type="button"
+            onClick={() => setOrderMode('regular')}
+            className={cn(
+              'flex-1 py-1.5 px-3 text-sm rounded-md transition-colors',
+              orderMode === 'regular'
+                ? 'bg-background shadow-sm font-medium'
+                : 'text-muted-foreground hover:text-foreground'
+            )}
+          >
+            Regular
+          </button>
+          <button
+            type="button"
+            onClick={() => setOrderMode('smart')}
+            className={cn(
+              'flex-1 py-1.5 px-3 text-sm rounded-md transition-colors',
+              orderMode === 'smart'
+                ? 'bg-background shadow-sm font-medium'
+                : 'text-muted-foreground hover:text-foreground'
+            )}
+          >
+            Smart
+          </button>
+        </div>
 
         <div className="space-y-4 py-2">
           {/* Quote Header - merged WebSocket + REST data */}
@@ -454,6 +500,25 @@ export function PlaceOrderDialog({
             </div>
           )}
 
+          {/* Smart Order: Position Size */}
+          {orderMode === 'smart' && (
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <Label className="text-xs">Position Size (Target Net Position)</Label>
+              </div>
+              <Input
+                type="number"
+                value={formPositionSize}
+                onChange={(e) => setFormPositionSize(parseInt(e.target.value) || 0)}
+                placeholder="e.g. 25 (long), -25 (short), 0 (flatten)"
+              />
+              <p className="text-[10px] text-muted-foreground">
+                Desired net position. Positive = long, negative = short, 0 = flatten.
+                Platform auto-calculates the delta to trade.
+              </p>
+            </div>
+          )}
+
           {/* Trigger Price Input (conditional) */}
           {needsTrigger && (
             <div className="space-y-2">
@@ -497,12 +562,12 @@ export function PlaceOrderDialog({
           </Button>
           <Button
             onClick={handleSubmit}
-            disabled={!isValid() || isSubmitting}
+            disabled={!(orderMode === 'smart' ? isSmartValid() : isValid()) || isSubmitting}
             className={cn(
               formAction === 'BUY' ? 'bg-green-600 hover:bg-green-700' : 'bg-red-600 hover:bg-red-700'
             )}
           >
-            {isSubmitting ? 'Placing...' : `Place ${formAction} Order`}
+            {isSubmitting ? 'Placing...' : `Place ${formAction} ${orderMode === 'smart' ? 'Smart ' : ''}Order`}
           </Button>
         </DialogFooter>
       </DialogContent>

@@ -238,11 +238,19 @@ def place_order_with_auth(
 
         return True, order_response_data, 200
     else:
-        message = (
-            response_data.get("message", "Failed to place order")
-            if isinstance(response_data, dict)
-            else "Failed to place order"
-        )
+        if isinstance(response_data, dict):
+            # Try standard "message" key first, then broker-specific formats
+            # e.g. Dhan uses "errorMessage" + "errorCode"
+            raw_msg = response_data.get("message") or response_data.get("errorMessage")
+            error_code = response_data.get("errorCode")
+            if raw_msg and error_code:
+                message = f"{raw_msg} ({error_code})"
+            elif raw_msg:
+                message = raw_msg
+            else:
+                message = "Failed to place order"
+        else:
+            message = "Failed to place order"
         error_response = {"status": "error", "message": message}
         bus.publish(OrderFailedEvent(
             mode="live",

@@ -4,14 +4,16 @@ import {
   Download,
   Loader2,
   Pencil,
+  Plus,
   RefreshCw,
+  Search,
   Settings2,
   X,
   XCircle,
   ArrowUp,
   ArrowDown,
 } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { type OrderEventType, useOrderEventRefresh } from '@/hooks/useOrderEventRefresh'
 import { showToast } from '@/utils/toast'
 import { type QuotesData, tradingApi } from '@/api/trading'
@@ -54,6 +56,7 @@ import { useSupportedExchanges } from '@/hooks/useSupportedExchanges'
 import { useAuthStore } from '@/stores/authStore'
 import { onModeChange } from '@/stores/themeStore'
 import type { Order, OrderStats } from '@/types/trading'
+import { PlaceOrderDialog } from '@/components/trading'
 
 // Sort configuration types
 type SortKey = 'timestamp' | 'symbol' | 'action' | 'order_status';
@@ -151,6 +154,19 @@ export default function OrderBook() {
     product: 'MIS' as string,
   })
 
+  // New Order state
+  interface SymbolResult { symbol: string; exchange: string; lotsize: number | null; tick_size?: number | null }
+  const [newOrderOpen, setNewOrderOpen] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [searchResults, setSearchResults] = useState<SymbolResult[]>([])
+  const [isSearching, setIsSearching] = useState(false)
+  const [selectedSymbol, setSelectedSymbol] = useState<SymbolResult | null>(null)
+  const [searchDropdownOpen, setSearchDropdownOpen] = useState(false)
+  const [selectedExchange, setSelectedExchange] = useState('')
+  const searchRef = useRef<HTMLDivElement>(null)
+  const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const { tradingExchanges } = useSupportedExchanges()
+
   // Filter and Sort orders
   const sortedAndFilteredOrders = useMemo(() => {
     // 1. Filter Logic
@@ -196,6 +212,72 @@ export default function OrderBook() {
 
   const clearFilters = () => {
     setStatusFilter([])
+  }
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (searchRef.current && !searchRef.current.contains(e.target as Node)) {
+        setSearchDropdownOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
+
+  const triggerSearch = (query: string, exchange: string) => {
+    if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current)
+    if (query.trim().length < 2) {
+      setSearchResults([])
+      setSearchDropdownOpen(false)
+      return
+    }
+    searchDebounceRef.current = setTimeout(async () => {
+      setIsSearching(true)
+      try {
+        const params = new URLSearchParams({ q: query.trim() })
+        if (exchange) params.set('exchange', exchange)
+        const res = await fetch(`/search/api/search?${params}`, { credentials: 'include' })
+        if (res.ok) {
+          const data = await res.json()
+          setSearchResults(data.results || [])
+          setSearchDropdownOpen(true)
+        }
+      } catch {
+        // silently ignore
+      } finally {
+        setIsSearching(false)
+      }
+    }, 300)
+  }
+
+  const handleSearchChange = (value: string) => {
+    setSearchQuery(value)
+    setSelectedSymbol(null)
+    triggerSearch(value, selectedExchange)
+  }
+
+  const handleExchangeChange = (exchange: string) => {
+    setSelectedExchange(exchange)
+    setSelectedSymbol(null)
+    triggerSearch(searchQuery, exchange)
+  }
+
+  const handleSelectSymbol = (result: SymbolResult) => {
+    setSelectedSymbol(result)
+    setSearchQuery(`${result.symbol} (${result.exchange})`)
+    setSearchDropdownOpen(false)
+  }
+
+  const openNewOrderDialog = () => {
+    if (!selectedSymbol) return
+    setNewOrderOpen(true)
+  }
+
+  const handleNewOrderSuccess = () => {
+    setNewOrderOpen(false)
+    setSelectedSymbol(null)
+    setSearchQuery('')
   }
 
   const fetchOrders = useCallback(
@@ -408,6 +490,58 @@ export default function OrderBook() {
           <p className="text-muted-foreground">View and manage your orders</p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
+          {/* Symbol Search + New Order */}
+          <div className="flex items-center gap-2">
+            <div className="relative" ref={searchRef}>
+              <div className="flex items-center gap-1 border rounded-md px-1 bg-background h-9">
+                <select
+                  value={selectedExchange}
+                  onChange={(e) => handleExchangeChange(e.target.value)}
+                  className="text-xs bg-transparent outline-none border-r pr-1 mr-1 text-muted-foreground cursor-pointer h-full"
+                  style={{ maxWidth: '72px' }}
+                >
+                  <option value="">All</option>
+                  {tradingExchanges.map((ex) => (
+                    <option key={ex.value} value={ex.value}>{ex.label}</option>
+                  ))}
+                </select>
+                <Search className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => handleSearchChange(e.target.value)}
+                  placeholder="Search symbol…"
+                  className="w-36 text-sm bg-transparent outline-none placeholder:text-muted-foreground"
+                />
+                {isSearching && <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground flex-shrink-0" />}
+              </div>
+              {searchDropdownOpen && searchResults.length > 0 && (
+                <div className="absolute z-50 top-full mt-1 left-0 w-72 bg-popover border rounded-md shadow-lg max-h-60 overflow-y-auto">
+                  {searchResults.slice(0, 20).map((r, i) => (
+                    <button
+                      key={i}
+                      type="button"
+                      className="w-full text-left px-3 py-2 text-sm hover:bg-muted flex items-center justify-between gap-2"
+                      onClick={() => handleSelectSymbol(r)}
+                    >
+                      <span className="font-medium truncate">{r.symbol}</span>
+                      <span className="text-xs text-muted-foreground flex-shrink-0">{r.exchange}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+            <Button
+              size="sm"
+              disabled={!selectedSymbol}
+              onClick={openNewOrderDialog}
+              className="bg-green-600 hover:bg-green-700 text-white"
+            >
+              <Plus className="h-4 w-4 mr-1" />
+              New Order
+            </Button>
+          </div>
+
           {/* Settings Button */}
           <Dialog open={settingsOpen} onOpenChange={setSettingsOpen}>
             <DialogTrigger asChild>
@@ -868,6 +1002,26 @@ export default function OrderBook() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* New Order Dialog */}
+      {selectedSymbol && (
+        <PlaceOrderDialog
+          open={newOrderOpen}
+          onOpenChange={(open) => {
+            setNewOrderOpen(open)
+            if (!open) {
+              setSelectedSymbol(null)
+              setSearchQuery('')
+            }
+          }}
+          symbol={selectedSymbol.symbol}
+          exchange={selectedSymbol.exchange}
+          lotSize={selectedSymbol.lotsize ?? 1}
+          tickSize={selectedSymbol.tick_size ?? 0.05}
+          strategy="Manual"
+          onSuccess={handleNewOrderSuccess}
+        />
+      )}
     </div>
   )
 }

@@ -1,4 +1,5 @@
 import {
+  BarChart2,
   BarChart3,
   Bell,
   BookOpen,
@@ -67,6 +68,7 @@ export const profileMenuItems: NavItem[] = [
   { href: '/flow', label: 'Flow Editor', icon: Workflow },
   { href: '/python', label: 'Python Strategies', icon: Code2 },
   { href: '/pnl-tracker', label: 'PnL Tracker', icon: BarChart3 },
+  { href: '/trade-statistics', label: 'Statistics', icon: BarChart2 },
   { href: '/historify', label: 'Historify', icon: Database },
   { href: '/search/token', label: 'Search', icon: Search },
   { href: '/sandbox', label: 'Sandbox', icon: FlaskConical },

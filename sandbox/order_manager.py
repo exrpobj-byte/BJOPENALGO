@@ -304,7 +304,10 @@ class OrderManager:
 
                 # Fetch current LTP to check if this LIMIT order is marketable
                 # Marketable = can be executed immediately at market price
-                # Use pre-fetched quote if available, otherwise REST API with retry
+                # Use pre-fetched quote if available, otherwise skip (order placed as PENDING).
+                # Live quote fetch is intentionally skipped here to avoid blocking the request
+                # thread — the execution engine checks marketability asynchronously on its
+                # next tick.
                 marketability_checked = False
 
                 if prefetched_quote and prefetched_quote.get("ltp"):
@@ -323,27 +326,12 @@ class OrderManager:
                         logger.debug(f"Pre-fetched marketability check failed: {e}")
 
                 if not marketability_checked:
-                    for attempt in range(3):
-                        try:
-                            from sandbox.execution_engine import ExecutionEngine
-
-                            engine = ExecutionEngine()
-                            quote = engine._fetch_quote(symbol, exchange)
-                            if quote and quote.get("ltp") and Decimal(str(quote["ltp"])) > 0:
-                                current_ltp = Decimal(str(quote["ltp"]))
-                                if (action == "BUY" and current_ltp <= price) or (
-                                    action == "SELL" and current_ltp >= price
-                                ):
-                                    cached_quote = quote
-                                    logger.info(
-                                        f"LIMIT order is marketable: {action} limit={price}, LTP={current_ltp}"
-                                    )
-                                break
-                        except Exception as e:
-                            logger.debug(f"Marketability check attempt {attempt + 1} failed: {e}")
-
-                        if attempt < 2:
-                            time.sleep(0.3 * (attempt + 1))
+                    # No pre-fetched quote available; place as PENDING.
+                    # The execution engine will execute the order when the market
+                    # price reaches the limit price.
+                    logger.debug(
+                        f"No pre-fetched quote for LIMIT order {symbol} — placing as PENDING"
+                    )
 
             elif price_type in ["SL", "SL-M"]:
                 # For SL/SL-M orders, use trigger price for margin calculation
@@ -387,41 +375,12 @@ class OrderManager:
                         logger.debug(f"Pre-fetched SL trigger check failed: {e}")
 
                 if not trigger_checked:
-                    for attempt in range(3):
-                        try:
-                            from sandbox.execution_engine import ExecutionEngine
-
-                            engine = ExecutionEngine()
-                            quote = engine._fetch_quote(symbol, exchange)
-                            if quote and quote.get("ltp") and Decimal(str(quote["ltp"])) > 0:
-                                current_ltp = Decimal(str(quote["ltp"]))
-                                trigger_met = False
-
-                                if action == "BUY" and current_ltp >= trigger_price:
-                                    trigger_met = True
-                                elif action == "SELL" and current_ltp <= trigger_price:
-                                    trigger_met = True
-
-                                if trigger_met:
-                                    if price_type == "SL-M":
-                                        cached_quote = quote
-                                        logger.info(
-                                            f"SL-M order trigger already met: {action} trigger={trigger_price}, LTP={current_ltp}"
-                                        )
-                                    elif price_type == "SL":
-                                        if (action == "BUY" and current_ltp <= price) or (
-                                            action == "SELL" and current_ltp >= price
-                                        ):
-                                            cached_quote = quote
-                                            logger.info(
-                                                f"SL order trigger+limit already met: {action} trigger={trigger_price}, limit={price}, LTP={current_ltp}"
-                                            )
-                                break
-                        except Exception as e:
-                            logger.debug(f"SL trigger check attempt {attempt + 1} failed: {e}")
-
-                        if attempt < 2:
-                            time.sleep(0.3 * (attempt + 1))
+                    # No pre-fetched quote available; place as PENDING.
+                    # The execution engine will execute the order when the trigger
+                    # price is reached.
+                    logger.debug(
+                        f"No pre-fetched quote for {price_type} order {symbol} — placing as PENDING"
+                    )
 
             # Validate that we have a valid price for margin calculation
             if not margin_calculation_price or margin_calculation_price <= 0:

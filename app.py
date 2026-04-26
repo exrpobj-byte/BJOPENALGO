@@ -36,6 +36,7 @@ from blueprints.broker_credentials import (
 )
 from blueprints.chartink import chartink_bp  # Import the chartink blueprint
 from blueprints.strategy_portfolio import strategy_portfolio_bp  # Strategy Builder portfolio
+from blueprints.trade_statistics import trade_stats_bp  # Trade Statistics blueprint
 from blueprints.core import core_bp
 from blueprints.dashboard import dashboard_bp
 from blueprints.flow import flow_bp  # Import the flow blueprint
@@ -272,6 +273,7 @@ def create_app():
     app.register_blueprint(broker_credentials_bp)  # Register Broker credentials blueprint
     app.register_blueprint(system_permissions_bp)  # Register System permissions blueprint
     app.register_blueprint(strategy_portfolio_bp)  # Register Strategy Portfolio blueprint
+    app.register_blueprint(trade_stats_bp)  # Register Trade Statistics blueprint
 
     # Exempt webhook endpoints from CSRF protection after app initialization
     with app.app_context():
